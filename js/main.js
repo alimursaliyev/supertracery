@@ -540,14 +540,15 @@
 
         function onMouseMove(evt) {
             var rect = pickerImage.getBoundingClientRect();
+            var vpRect = pickerViewport.getBoundingClientRect();
             var mx = evt.clientX;
             var my = evt.clientY;
 
             /* Only show crosshair when cursor is over the image */
             if (mx >= rect.left && mx <= rect.right && my >= rect.top && my <= rect.bottom) {
                 pickerCrosshair.style.display = "block";
-                pickerCrosshair.style.left = mx + "px";
-                pickerCrosshair.style.top  = my + "px";
+                pickerCrosshair.style.left = (mx - vpRect.left) + "px";
+                pickerCrosshair.style.top  = (my - vpRect.top)  + "px";
 
                 var scaleX = pickerCompW / rect.width;
                 var scaleY = pickerCompH / rect.height;
