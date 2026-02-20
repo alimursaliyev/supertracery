@@ -760,3 +760,123 @@ html, body {
     letter-spacing: 0.06em;
     display: none;
 }
+
+/* ── Picker Canvas (SAM2 preview overlay) ──────────────── */
+.picker-canvas {
+    position: absolute;
+    pointer-events: none;
+    z-index: 2;
+}
+
+/* ── Picker Score Badge ────────────────────────────────── */
+.picker-score {
+    position: absolute;
+    bottom: 8px;
+    left: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--ac);
+    background: rgba(0, 0, 0, 0.8);
+    padding: 3px 8px;
+    border: 1px solid var(--ac-border);
+    pointer-events: none;
+    letter-spacing: 0.06em;
+    display: none;
+    z-index: 3;
+}
+
+/* ── Picker Loading Indicator ──────────────────────────── */
+.picker-loading {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--ac);
+    letter-spacing: 0.15em;
+    background: rgba(0, 0, 0, 0.7);
+    padding: 8px 16px;
+    border: 1px solid var(--ac-border);
+    pointer-events: none;
+    z-index: 4;
+    display: none;
+    animation: picker-blink 1.2s step-end infinite;
+}
+@keyframes picker-blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.3; }
+}
+
+/* ── Slider Controls ───────────────────────────────────── */
+.slider-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.st-slider {
+    flex: 1;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 2px;
+    background: var(--b3);
+    outline: none;
+    cursor: pointer;
+}
+.st-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 10px;
+    height: 10px;
+    background: var(--ac);
+    border: none;
+    cursor: pointer;
+}
+
+.slider-value {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--t1);
+    font-variant-numeric: tabular-nums;
+    min-width: 30px;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+/* ── Object Color Swatch ───────────────────────────────── */
+.obj-color-swatch {
+    width: 10px;
+    height: 10px;
+    display: inline-block;
+    cursor: pointer;
+    flex-shrink: 0;
+    border: 1px solid var(--b3);
+    transition: border-color 100ms;
+}
+.obj-color-swatch:hover {
+    border-color: var(--t1);
+}
+
+/* ── Color Picker Popup ────────────────────────────────── */
+.color-picker-popup {
+    position: absolute;
+    z-index: 100;
+    background: var(--bg-2);
+    border: 1px solid var(--b3);
+    padding: 4px;
+    display: flex;
+    gap: 3px;
+    flex-wrap: wrap;
+    width: 74px;
+}
+.color-chip {
+    width: 14px;
+    height: 14px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: border-color 100ms;
+}
+.color-chip:hover {
+    border-color: var(--t0);
+}

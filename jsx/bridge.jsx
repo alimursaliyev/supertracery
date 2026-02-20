@@ -305,7 +305,7 @@ function st_generateOverlays(jsonString, options) {
     }
 }
 
-function _st_generateOverlayObjects(data, opts) {
+function _st_generateOverlayObjects(data, opts, polygonData) {
     try {
         var comp = app.project.activeItem;
         if (!comp || !(comp instanceof CompItem)) {
@@ -355,7 +355,7 @@ function _st_generateOverlayObjects(data, opts) {
                     var bboxStroke = bboxGC.property(2); // Stroke
 
                     bboxStroke.property("ADBE Vector Stroke Color").setValue(color);
-                    bboxStroke.property("ADBE Vector Stroke Width").setValue(2);
+                    bboxStroke.property("ADBE Vector Stroke Width").setValue(opts.strokeWidth || 2);
 
                     var rectSize = bboxRect.property("ADBE Vector Rect Size");
                     var bboxPos  = bboxLayer.transform.position;
@@ -448,7 +448,7 @@ function _st_generateOverlayObjects(data, opts) {
                     var arrStroke = arrGrpC.property(2); // Stroke
 
                     arrStroke.property("ADBE Vector Stroke Color").setValue(color);
-                    arrStroke.property("ADBE Vector Stroke Width").setValue(2);
+                    arrStroke.property("ADBE Vector Stroke Width").setValue(opts.strokeWidth || 2);
 
                     var arrPathData = arrPath.property("ADBE Vector Shape");
                     var arrPos = arrLayer.transform.position;
@@ -477,6 +477,67 @@ function _st_generateOverlayObjects(data, opts) {
                     createdLayers.push(arrLayer);
                 } catch (eArr) {
                     errors.push("Arrow_" + objId + ": " + eArr.toString());
+                }
+            }
+
+            // MASK OUTLINE
+            if (opts.showMask && polygonData) {
+                try {
+                    // Find polygon data for this object
+                    var polyObj = null;
+                    for (var pi = 0; pi < polygonData.objects.length; pi++) {
+                        if (polygonData.objects[pi].object_id === objId) {
+                            polyObj = polygonData.objects[pi];
+                            break;
+                        }
+                    }
+
+                    if (polyObj && polyObj.frames) {
+                        var maskLayer = comp.layers.addShape();
+                        maskLayer.name = "ST_Mask_" + objId;
+
+                        var maskContents = maskLayer.property("ADBE Root Vectors Group");
+                        var maskGrp = maskContents.addProperty("ADBE Vector Group");
+                        maskGrp.name = "MaskOutline";
+                        var maskGrpC = maskGrp.property("ADBE Vectors Group");
+
+                        // Add path, stroke, and fill — then re-fetch by index
+                        maskGrpC.addProperty("ADBE Vector Shape - Group");
+                        maskGrpC.addProperty("ADBE Vector Graphic - Stroke");
+                        maskGrpC.addProperty("ADBE Vector Graphic - Fill");
+                        var maskPath   = maskGrpC.property(1); // Path
+                        var maskStroke = maskGrpC.property(2); // Stroke
+                        var maskFill   = maskGrpC.property(3); // Fill
+
+                        maskStroke.property("ADBE Vector Stroke Color").setValue(color);
+                        maskStroke.property("ADBE Vector Stroke Width").setValue(opts.strokeWidth || 2);
+
+                        maskFill.property("ADBE Vector Fill Color").setValue(color);
+                        var fillOpPct = (opts.maskFillOpacity != null) ? opts.maskFillOpacity : 15;
+                        maskFill.property("ADBE Vector Fill Opacity").setValue(fillOpPct);
+
+                        var maskPathData = maskPath.property("ADBE Vector Shape");
+
+                        for (j = 0; j < polyObj.frames.length; j++) {
+                            var pf = polyObj.frames[j];
+                            var poly = pf.polygon;
+                            if (!poly || poly.length < 3) { continue; }
+
+                            var t5 = pf.frame_index / fps;
+                            var shape5 = new Shape();
+                            var verts = [];
+                            for (var vi = 0; vi < poly.length; vi++) {
+                                verts.push([poly[vi][0], poly[vi][1]]);
+                            }
+                            shape5.vertices = verts;
+                            shape5.closed = true;
+                            maskPathData.setValueAtTime(t5, shape5);
+                        }
+
+                        createdLayers.push(maskLayer);
+                    }
+                } catch (eMask) {
+                    errors.push("Mask_" + objId + ": " + eMask.toString());
                 }
             }
         }
@@ -545,6 +606,16 @@ function _st_generateOverlayObjects(data, opts) {
             }
         }
 
+        // Apply overlay opacity to all created layers (if < 100)
+        var opVal = (opts.overlayOpacity != null) ? opts.overlayOpacity : 100;
+        if (opVal < 100) {
+            for (var ol = 0; ol < createdLayers.length; ol++) {
+                try {
+                    createdLayers[ol].transform.opacity.setValue(opVal);
+                } catch (eOp) {}
+            }
+        }
+
         app.endUndoGroup();
 
         if (errors.length > 0) {
@@ -564,7 +635,7 @@ function _st_generateOverlayObjects(data, opts) {
 // Reads JSON from temp files to avoid evalScript string limits.
 // ─────────────────────────────────────────────────────────────
 
-function st_generateOverlaysFromFiles(resultsPath, optionsPath) {
+function st_generateOverlaysFromFiles(resultsPath, optionsPath, polygonsPath) {
     try {
         var rFile = new File(resultsPath);
         if (!rFile.exists) {
@@ -602,7 +673,24 @@ function st_generateOverlaysFromFiles(resultsPath, optionsPath) {
             opts = eval("(" + optionsString + ")");
         }
 
-        return _st_generateOverlayObjects(data, opts);
+        // Read polygon data if provided
+        var polygonData = null;
+        if (typeof polygonsPath !== "undefined" && polygonsPath) {
+            var pFile = new File(polygonsPath);
+            if (pFile.exists) {
+                pFile.encoding = "UTF-8";
+                pFile.open("r");
+                var polyString = pFile.read();
+                pFile.close();
+                try {
+                    polygonData = JSON.parse(polyString);
+                } catch (pe3) {
+                    polygonData = eval("(" + polyString + ")");
+                }
+            }
+        }
+
+        return _st_generateOverlayObjects(data, opts, polygonData);
     } catch (e) {
         return '{"error":' + JSON.stringify("FromFiles: " + e.toString() + " (line " + (e.line || "?") + ")") + '}';
     }

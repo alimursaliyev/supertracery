@@ -29,11 +29,24 @@
                              arrow: false, mask: false, connect: false };
     var connMode         = "none";
     var lineStyle        = "straight";
+    var strokeWidth      = 2;
+    var overlayOpacity   = 100;
+    var maskFillOpacity  = 15;
+    var objectColors     = {};      // id -> hex color override
     var comp             = null;      // info from st_getCompInfo()
     var picking          = false;     // guard against double-clicks
     var tracking         = false;     // true while Python subprocess is running
     var trackingResults  = null;      // parsed results.json after tracking
     var pythonProc       = null;      // child_process handle (for cancel)
+
+    /* Preview server state */
+    var previewProc      = null;
+    var previewReady     = false;
+    var previewResult    = null;
+    var previewCanvas    = null;
+    var previewCtx       = null;
+    var previewThrottleTimer = null;
+    var previewLastQuery = 0;
 
     /* ── CEP bridge ─────────────────────────────────────────── */
     var cs = null;
@@ -124,6 +137,29 @@
         var lineOpts = document.querySelectorAll("#lineStyle .opt");
         for (var k = 0; k < lineOpts.length; k++) {
             lineOpts[k].addEventListener("click", onLineStyleClick);
+        }
+
+        /* Sliders */
+        var slStroke = document.getElementById("sliderStrokeWidth");
+        if (slStroke) {
+            slStroke.addEventListener("input", function () {
+                strokeWidth = parseInt(slStroke.value, 10);
+                document.getElementById("valStrokeWidth").textContent = String(strokeWidth);
+            });
+        }
+        var slOpacity = document.getElementById("sliderOverlayOpacity");
+        if (slOpacity) {
+            slOpacity.addEventListener("input", function () {
+                overlayOpacity = parseInt(slOpacity.value, 10);
+                document.getElementById("valOverlayOpacity").textContent = overlayOpacity + "%";
+            });
+        }
+        var slMask = document.getElementById("sliderMaskFillOpacity");
+        if (slMask) {
+            slMask.addEventListener("input", function () {
+                maskFillOpacity = parseInt(slMask.value, 10);
+                document.getElementById("valMaskFillOpacity").textContent = maskFillOpacity + "%";
+            });
         }
 
         setStatus("READY", "idle");
@@ -243,6 +279,209 @@
         });
     }
 
+    /* ── Preview server lifecycle ─────────────────────────── */
+    function startPreviewServer(framePath) {
+        if (!childProcess) { return; }
+
+        previewReady  = false;
+        previewResult = null;
+
+        var pickerLoading = document.getElementById("pickerLoading");
+        if (pickerLoading) { pickerLoading.style.display = "block"; }
+
+        var pythonScript = extPath + "/python/preview_server.py";
+        var venvPython   = extPath + "/python/venv/bin/python3";
+
+        function trySpawn(cmd) {
+            var proc;
+            try {
+                proc = childProcess.spawn(cmd, [pythonScript, framePath], {
+                    cwd: extPath + "/python"
+                });
+            } catch (e) {
+                return null;
+            }
+            return proc;
+        }
+
+        var proc = trySpawn(venvPython);
+        if (!proc) { proc = trySpawn("python3"); }
+        if (!proc) { proc = trySpawn("python"); }
+        if (!proc) {
+            log("preview: could not start python");
+            if (pickerLoading) { pickerLoading.style.display = "none"; }
+            return;
+        }
+
+        previewProc = proc;
+        var stdoutBuf = "";
+
+        proc.stdout.on("data", function (chunk) {
+            stdoutBuf += chunk.toString();
+            var lines = stdoutBuf.split("\n");
+            stdoutBuf = lines.pop();
+
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i].trim();
+                if (!line) { continue; }
+
+                if (line === "READY") {
+                    previewReady = true;
+                    if (pickerLoading) { pickerLoading.style.display = "none"; }
+                    log("preview: SAM2 ready");
+                    continue;
+                }
+
+                if (line.indexOf("ERROR:") === 0) {
+                    log("preview: " + line);
+                    if (pickerLoading) { pickerLoading.style.display = "none"; }
+                    continue;
+                }
+
+                if (line.indexOf("INFO:") === 0) {
+                    continue; // suppress model loading messages
+                }
+
+                // Try to parse as JSON result
+                try {
+                    var result = JSON.parse(line);
+                    if (result.error) {
+                        log("preview error: " + result.error);
+                    } else {
+                        previewResult = result;
+                        drawPreview();
+                    }
+                } catch (e) {
+                    // Not JSON, ignore
+                }
+            }
+        });
+
+        proc.stderr.on("data", function () {});
+
+        proc.on("error", function () {
+            previewProc = null;
+            previewReady = false;
+            if (pickerLoading) { pickerLoading.style.display = "none"; }
+        });
+
+        proc.on("close", function () {
+            previewProc = null;
+            previewReady = false;
+        });
+    }
+
+    function sendPreviewQuery(x, y) {
+        if (!previewProc || !previewReady) { return; }
+        var now = Date.now();
+        if (now - previewLastQuery < 150) { return; }
+        previewLastQuery = now;
+
+        try {
+            previewProc.stdin.write(JSON.stringify({ x: x, y: y }) + "\n");
+        } catch (e) {
+            // stdin closed
+        }
+    }
+
+    function sizeCanvasToImage() {
+        if (!previewCanvas || !pickerImage || !pickerViewport) { return; }
+        var imgRect = pickerImage.getBoundingClientRect();
+        var vpRect  = pickerViewport.getBoundingClientRect();
+        /* Position relative to the parent (picker-viewport), not the browser window */
+        previewCanvas.width  = imgRect.width;
+        previewCanvas.height = imgRect.height;
+        previewCanvas.style.left   = (imgRect.left - vpRect.left) + "px";
+        previewCanvas.style.top    = (imgRect.top  - vpRect.top)  + "px";
+        previewCanvas.style.width  = imgRect.width  + "px";
+        previewCanvas.style.height = imgRect.height + "px";
+    }
+
+    function drawPreview() {
+        if (!previewCanvas || !previewCtx || !previewResult) { return; }
+
+        var canvas = previewCanvas;
+        var ctx    = previewCtx;
+        var img    = pickerImage;
+        var rect   = img.getBoundingClientRect();
+
+        if (rect.width === 0 || rect.height === 0) { return; }
+
+        var scaleX = rect.width  / pickerCompW;
+        var scaleY = rect.height / pickerCompH;
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        var poly = previewResult.polygon;
+        var bbox = previewResult.bbox;
+
+        // Draw polygon fill + stroke
+        if (poly && poly.length >= 3) {
+            ctx.beginPath();
+            ctx.moveTo(poly[0][0] * scaleX, poly[0][1] * scaleY);
+            for (var i = 1; i < poly.length; i++) {
+                ctx.lineTo(poly[i][0] * scaleX, poly[i][1] * scaleY);
+            }
+            ctx.closePath();
+            ctx.fillStyle = "rgba(63,184,245,0.25)";
+            ctx.fill();
+            ctx.strokeStyle = "rgba(63,184,245,0.8)";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        }
+
+        // Draw bounding box (dashed)
+        if (bbox) {
+            ctx.setLineDash([4, 3]);
+            ctx.strokeStyle = "rgba(63,184,245,0.5)";
+            ctx.lineWidth = 1;
+            ctx.strokeRect(
+                bbox[0] * scaleX,
+                bbox[1] * scaleY,
+                (bbox[2] - bbox[0]) * scaleX,
+                (bbox[3] - bbox[1]) * scaleY
+            );
+            ctx.setLineDash([]);
+        }
+
+        // Update score badge
+        var scoreBadge = document.getElementById("pickerScore");
+        if (scoreBadge && previewResult.score != null) {
+            scoreBadge.style.display = "block";
+            scoreBadge.textContent = "SCORE: " + Math.round(previewResult.score * 100) + "%";
+        }
+    }
+
+    function clearPreview() {
+        if (previewCtx && previewCanvas) {
+            previewCtx.clearRect(0, 0, previewCanvas.width, previewCanvas.height);
+        }
+        previewResult = null;
+        var scoreBadge = document.getElementById("pickerScore");
+        if (scoreBadge) { scoreBadge.style.display = "none"; }
+    }
+
+    function stopPreviewServer() {
+        if (previewProc) {
+            try {
+                previewProc.stdin.write("QUIT\n");
+            } catch (e) {}
+            try {
+                previewProc.kill("SIGTERM");
+            } catch (e) {}
+            previewProc = null;
+        }
+        previewReady  = false;
+        previewResult = null;
+        if (previewThrottleTimer) {
+            clearTimeout(previewThrottleTimer);
+            previewThrottleTimer = null;
+        }
+        clearPreview();
+        var pickerLoading = document.getElementById("pickerLoading");
+        if (pickerLoading) { pickerLoading.style.display = "none"; }
+    }
+
     function openPickerOverlay(framePath) {
         pickerOverlay   = document.getElementById("pickerOverlay");
         pickerImage     = document.getElementById("pickerImage");
@@ -251,11 +490,23 @@
         pickerCancel    = document.getElementById("pickerCancel");
         pickerViewport  = document.getElementById("pickerViewport");
 
+        /* Preview canvas setup */
+        previewCanvas = document.getElementById("pickerCanvas");
+        previewCtx    = previewCanvas ? previewCanvas.getContext("2d") : null;
+
         /* Load the exported frame — CEP has file:// access via CEF flags */
         pickerImage.src = "file://" + framePath;
         pickerOverlay.classList.add("active");
         pickerCrosshair.style.display = "none";
         pickerCoords.style.display    = "none";
+
+        /* Size canvas to match image once loaded */
+        pickerImage.onload = function () {
+            sizeCanvasToImage();
+        };
+
+        /* Start SAM2 preview server */
+        startPreviewServer(framePath);
 
         /* --- Event handlers --- */
         function onImageClick(evt) {
@@ -271,8 +522,14 @@
 
             cleanup();
 
-            /* Add the tracked point */
+            /* Add the tracked point, enriched with preview data if available */
             var obj = { id: nextId, x: x, y: y };
+            if (previewResult) {
+                obj.bbox     = previewResult.bbox;
+                obj.polygon  = previewResult.polygon;
+                obj.centroid = previewResult.centroid;
+                obj.score    = previewResult.score;
+            }
             objects.push(obj);
             nextId++;
             renderObjectList();
@@ -298,6 +555,9 @@
                 var cy = Math.round((my - rect.top) * scaleY);
                 pickerCoords.style.display = "block";
                 pickerCoords.textContent = "X:" + pad4(cx) + "  Y:" + pad4(cy);
+
+                /* Send SAM2 preview query (throttled) */
+                sendPreviewQuery(cx, cy);
             } else {
                 pickerCrosshair.style.display = "none";
                 pickerCoords.style.display    = "none";
@@ -325,6 +585,7 @@
             pickerCrosshair.style.display = "none";
             pickerCoords.style.display    = "none";
             pickerCleanup = null;
+            stopPreviewServer();
         }
 
         pickerCleanup = cleanup;
@@ -647,6 +908,27 @@
 
     /* ── Generate overlays ────────────────────────────────── */
 
+    /* Extract only polygon data from tracking results for mask shape layers. */
+    function extractPolygonData(results) {
+        var polyData = { objects: [] };
+        for (var i = 0; i < results.objects.length; i++) {
+            var obj = results.objects[i];
+            var polyFrames = [];
+            for (var j = 0; j < obj.frames.length; j++) {
+                var f = obj.frames[j];
+                polyFrames.push({
+                    frame_index: f.frame_index,
+                    polygon:     f.polygon || []
+                });
+            }
+            polyData.objects.push({
+                object_id: obj.object_id,
+                frames:    polyFrames
+            });
+        }
+        return polyData;
+    }
+
     /* Strip polygon/mask data from tracking results before sending to JSX.
        ExtendScript chokes on large JSON — polygons are ~77% of the data
        and the overlay generator doesn't use them. */
@@ -683,32 +965,43 @@
         /* Build options from current toggle/selector state */
         var colorMap = {};
         for (var i = 0; i < objects.length; i++) {
-            colorMap[String(objects[i].id)] = COLORS[i % COLORS.length];
+            var oid = String(objects[i].id);
+            colorMap[oid] = objectColors[oid] || COLORS[i % COLORS.length];
         }
 
         var options = {
-            showBBox:        toggles.bbox,
-            showMarker:      toggles.marker,
-            showLabel:       toggles.label,
-            showArrow:       toggles.arrow,
-            showMask:        toggles.mask,
-            showConnect:     toggles.connect,
-            connectionMode:  connMode,
-            lineStyle:       lineStyle,
-            colors:          colorMap
+            showBBox:         toggles.bbox,
+            showMarker:       toggles.marker,
+            showLabel:        toggles.label,
+            showArrow:        toggles.arrow,
+            showMask:         toggles.mask,
+            showConnect:      toggles.connect,
+            connectionMode:   connMode,
+            lineStyle:        lineStyle,
+            colors:           colorMap,
+            strokeWidth:      strokeWidth,
+            overlayOpacity:   overlayOpacity,
+            maskFillOpacity:  maskFillOpacity
         };
 
         /* Write JSON to temp files — avoids evalScript string size limits.
            Strip polygon data from results before writing — ExtendScript can't
            handle the full JSON (polygons are 70-80% of the data and unused
            by the overlay generator). */
-        var resultsFile = (tempFolder + "/overlay_results.json").replace(/\\/g, "/");
-        var optionsFile = (tempFolder + "/overlay_options.json").replace(/\\/g, "/");
+        var resultsFile  = (tempFolder + "/overlay_results.json").replace(/\\/g, "/");
+        var optionsFile  = (tempFolder + "/overlay_options.json").replace(/\\/g, "/");
+        var polygonsFile = (tempFolder + "/overlay_polygons.json").replace(/\\/g, "/");
 
         try {
             var strippedResults = stripPolygonData(trackingResults);
             fs.writeFileSync(resultsFile, JSON.stringify(strippedResults), "utf8");
             fs.writeFileSync(optionsFile, JSON.stringify(options), "utf8");
+
+            /* Write polygon data only when mask is ON */
+            if (toggles.mask) {
+                var polyData = extractPolygonData(trackingResults);
+                fs.writeFileSync(polygonsFile, JSON.stringify(polyData), "utf8");
+            }
         } catch (writeErr) {
             log("error: could not write temp files \u2014 " + writeErr.message);
             btnGenerate.disabled = false;
@@ -719,10 +1012,19 @@
         var rSize = fs.statSync(resultsFile).size;
         log("data written (" + Math.round(rSize / 1024) + "KB), calling AE\u2026");
 
-        /* JSX reads the files itself */
+        /* JSX reads the files itself — pass polygon path as 3rd arg when mask is ON */
+        var jsxCall = 'st_generateOverlaysFromFiles("' + escJs(resultsFile) + '","' + escJs(optionsFile) + '"';
+        if (toggles.mask) {
+            jsxCall += ',"' + escJs(polygonsFile) + '"';
+        }
+        jsxCall += ')';
+
+        log("jsx call: " + jsxCall.substring(0, 120) + "\u2026");
+
         evalScript(
-            'st_generateOverlaysFromFiles("' + escJs(resultsFile) + '","' + escJs(optionsFile) + '")',
+            jsxCall,
             function (raw) {
+                log("jsx raw response: " + String(raw).substring(0, 200));
                 try {
                     var result = JSON.parse(raw);
                     if (result.error) {
@@ -767,13 +1069,14 @@
 
         for (var j = 0; j < objects.length; j++) {
             var o = objects[j];
+            var objColor = objectColors[String(o.id)] || COLORS[j % COLORS.length];
             var row = document.createElement("div");
             row.className = "obj-row";
             row.innerHTML =
                 '<span class="obj-idx">[' + pad2(o.id) + ']</span>' +
                 '<span class="obj-x">X:' + pad4(o.x) + '</span>' +
                 '<span class="obj-y">Y:' + pad4(o.y) + '</span>' +
-                '<span class="obj-dot" style="color:' + COLORS[j % COLORS.length] + '">&#9679;</span>' +
+                '<span class="obj-color-swatch" data-id="' + o.id + '" style="background:' + objColor + '"></span>' +
                 '<span class="obj-status">[READY]</span>' +
                 '<button class="obj-del" data-id="' + o.id + '">[&#215;]</button>';
 
@@ -781,7 +1084,61 @@
                 return function () { onRemoveObject(id); };
             })(o.id));
 
+            row.querySelector(".obj-color-swatch").addEventListener("click", (function (id, swatchEl) {
+                return function (evt) {
+                    evt.stopPropagation();
+                    openColorPicker(id, swatchEl);
+                };
+            })(o.id, row.querySelector(".obj-color-swatch")));
+
             objectList.appendChild(row);
+        }
+    }
+
+    /* ── Color Picker Popup ─────────────────────────────────── */
+    var activeColorPopup = null;
+
+    function openColorPicker(objId, swatchEl) {
+        closeColorPicker();
+        var popup = document.createElement("div");
+        popup.className = "color-picker-popup";
+
+        for (var i = 0; i < COLORS.length; i++) {
+            var chip = document.createElement("div");
+            chip.className = "color-chip";
+            chip.style.background = COLORS[i];
+            chip.setAttribute("data-color", COLORS[i]);
+            chip.addEventListener("click", (function (color) {
+                return function (evt) {
+                    evt.stopPropagation();
+                    objectColors[String(objId)] = color;
+                    swatchEl.style.background = color;
+                    closeColorPicker();
+                    log("color for point_" + pad2(objId) + " = " + color);
+                };
+            })(COLORS[i]));
+            popup.appendChild(chip);
+        }
+
+        /* Position near swatch */
+        var rect = swatchEl.getBoundingClientRect();
+        popup.style.position = "absolute";
+        popup.style.left = rect.left + "px";
+        popup.style.top  = (rect.bottom + 2) + "px";
+        document.body.appendChild(popup);
+        activeColorPopup = popup;
+
+        /* Close on outside click */
+        setTimeout(function () {
+            document.addEventListener("click", closeColorPicker);
+        }, 0);
+    }
+
+    function closeColorPicker() {
+        if (activeColorPopup) {
+            activeColorPopup.remove();
+            activeColorPopup = null;
+            document.removeEventListener("click", closeColorPicker);
         }
     }
 
@@ -797,6 +1154,12 @@
         stEl.setAttribute("data-on", isOn ? "true" : "false");
         stEl.textContent = isOn ? "[ON ]" : "[OFF]";
         log("viz." + key + " = " + (isOn ? "on" : "off"));
+
+        /* Show/hide mask fill opacity slider when mask toggle changes */
+        if (key === "mask") {
+            var maskBlock = document.getElementById("maskFillBlock");
+            if (maskBlock) { maskBlock.style.display = isOn ? "" : "none"; }
+        }
     }
 
     /* ── Connection mode ───────────────────────────────────── */
