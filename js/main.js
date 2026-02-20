@@ -494,8 +494,9 @@
         previewCanvas = document.getElementById("pickerCanvas");
         previewCtx    = previewCanvas ? previewCanvas.getContext("2d") : null;
 
-        /* Load the exported frame — CEP has file:// access via CEF flags */
-        pickerImage.src = "file://" + framePath;
+        /* Load the exported frame — CEP has file:// access via CEF flags.
+           Append timestamp to bust browser cache when the file is overwritten. */
+        pickerImage.src = "file://" + framePath + "?t=" + Date.now();
         pickerOverlay.classList.add("active");
         pickerCrosshair.style.display = "none";
         pickerCoords.style.display    = "none";
