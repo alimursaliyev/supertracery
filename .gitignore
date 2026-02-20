@@ -1,0 +1,17 @@
+# Python
+python/venv/
+__pycache__/
+*.pyc
+
+# Temp files from panel
+temp/
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Claude
+.claude/

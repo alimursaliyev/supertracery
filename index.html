@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>SuperTracery</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="layout">
+
+    <!-- ══ HEADER ══════════════════════════════════════════ -->
+    <div class="header">
+        <div class="header-left">
+            <span class="logo">SUPERTRACERY</span>
+            <span class="version">v1.0</span>
+        </div>
+        <div class="status-line">
+            <span class="status-cursor" id="statusCursor">█</span>
+            <span class="status-text" id="statusText">STATUS: READY</span>
+        </div>
+    </div>
+
+    <!-- ══ CONTENT ═════════════════════════════════════════ -->
+    <div class="content">
+
+        <!-- TRACK OBJECTS ─────────────────────────────────── -->
+        <div class="section">
+            <div class="section-header">
+                <span class="sh-title">TRACK_OBJECTS</span>
+                <div class="sh-rule"></div>
+                <span class="sh-count" id="objectCount">[0]</span>
+            </div>
+
+            <!-- Active composition info -->
+            <div class="comp-bar" id="compBar">
+                <div class="comp-info-col">
+                    <span class="comp-label">COMP</span>
+                    <span class="comp-name" id="compName">—</span>
+                </div>
+                <div class="comp-info-col">
+                    <span class="comp-label">RES</span>
+                    <span class="comp-res" id="compRes">—</span>
+                </div>
+                <div class="comp-info-col">
+                    <span class="comp-label">FRAME</span>
+                    <span class="comp-frame" id="compFrame">—</span>
+                </div>
+                <button class="btn-refresh" id="btnRefreshComp" title="Refresh comp">↻</button>
+            </div>
+
+            <!-- Pick point button -->
+            <div class="section-body">
+                <button class="btn-pick" id="btnAddObject">
+                    <span class="pick-cross">+</span>
+                    <span>PICK POINT FROM FRAME</span>
+                </button>
+                <div class="pick-hint" id="pickHint">Opens current frame &mdash; click on the object to track</div>
+            </div>
+
+            <!-- Tracked points list -->
+            <div class="object-list" id="objectList">
+                <div class="empty-state" id="emptyState">NO POINTS PICKED YET</div>
+            </div>
+        </div>
+
+        <!-- PROCESS ───────────────────────────────────────── -->
+        <div class="section">
+            <div class="section-header">
+                <span class="sh-title">PROCESS</span>
+                <div class="sh-rule"></div>
+            </div>
+            <div class="section-body">
+                <button class="btn-secondary" id="btnTrack" disabled>RUN_TRACKING</button>
+
+                <div class="progress-block" id="progressBlock">
+                    <div class="progress-header-row">
+                        <span class="progress-label">PROCESSING_FRAMES</span>
+                        <span class="progress-count" id="progressCount">000/000</span>
+                    </div>
+                    <div class="progress-track">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-stdout" id="progressStdout">&gt; waiting...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- VISUALIZATION ─────────────────────────────────── -->
+        <div class="section">
+            <div class="section-header">
+                <span class="sh-title">VISUALIZATION</span>
+                <div class="sh-rule"></div>
+            </div>
+
+            <div class="toggle-grid">
+                <div class="toggle-row" data-key="bbox">
+                    <span class="toggle-name">BOUNDING_BOX</span>
+                    <span class="toggle-state" id="tog-bbox" data-on="true">[ON ]</span>
+                </div>
+                <div class="toggle-row" data-key="marker">
+                    <span class="toggle-name">CENTER_MARKER</span>
+                    <span class="toggle-state" id="tog-marker" data-on="true">[ON ]</span>
+                </div>
+                <div class="toggle-row" data-key="label">
+                    <span class="toggle-name">LABEL</span>
+                    <span class="toggle-state" id="tog-label" data-on="true">[ON ]</span>
+                </div>
+                <div class="toggle-row" data-key="arrow">
+                    <span class="toggle-name">MOTION_ARROW</span>
+                    <span class="toggle-state" id="tog-arrow" data-on="false">[OFF]</span>
+                </div>
+                <div class="toggle-row" data-key="mask">
+                    <span class="toggle-name">MASK_OUTLINE</span>
+                    <span class="toggle-state" id="tog-mask" data-on="false">[OFF]</span>
+                </div>
+                <div class="toggle-row" data-key="connect">
+                    <span class="toggle-name">CONNECTIONS</span>
+                    <span class="toggle-state" id="tog-connect" data-on="false">[OFF]</span>
+                </div>
+            </div>
+
+            <div class="option-block">
+                <div class="option-label">CONNECTION_MODE</div>
+                <div class="option-selector" id="connMode">
+                    <span class="opt active" data-val="none">NONE</span>
+                    <span class="opt" data-val="sequential">SEQ</span>
+                    <span class="opt" data-val="star">STAR</span>
+                    <span class="opt" data-val="full">FULL</span>
+                    <span class="opt" data-val="mst">MST</span>
+                </div>
+            </div>
+
+            <div class="option-block">
+                <div class="option-label">LINE_STYLE</div>
+                <div class="option-selector" id="lineStyle">
+                    <span class="opt active" data-val="straight">STRAIGHT</span>
+                    <span class="opt" data-val="curved">CURVED</span>
+                    <span class="opt" data-val="dashed">DASHED</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- OUTPUT ────────────────────────────────────────── -->
+        <div class="section">
+            <div class="section-header">
+                <span class="sh-title">OUTPUT</span>
+                <div class="sh-rule"></div>
+            </div>
+            <div class="section-body">
+                <button class="btn-generate" id="btnGenerate" disabled>GENERATE_OVERLAYS</button>
+            </div>
+        </div>
+
+        <!-- LOG ───────────────────────────────────────────── -->
+        <div class="log-area" id="logArea">
+            <div class="log-line">
+                <span class="log-prefix">&gt;</span>
+                <span class="log-text">panel initialized</span>
+            </div>
+        </div>
+
+    </div><!-- /content -->
+
+    <!-- ══ BOTTOM BAR ══════════════════════════════════════ -->
+    <div class="bottom-bar">
+        <span class="model-indicator" id="modelIndicator">SAM2 LARGE</span>
+        <button class="btn-clear" id="btnClear">CLEAR_ALL</button>
+    </div>
+
+</div><!-- /layout -->
+
+<!-- ══ PICKER OVERLAY ═══════════════════════════════════ -->
+<div class="picker-overlay" id="pickerOverlay">
+    <div class="picker-bar">
+        <span class="picker-title">CLICK ON THE OBJECT TO TRACK</span>
+        <button class="picker-cancel" id="pickerCancel">[ESC] CANCEL</button>
+    </div>
+    <div class="picker-viewport" id="pickerViewport">
+        <img class="picker-image" id="pickerImage" draggable="false" />
+        <div class="picker-crosshair" id="pickerCrosshair"></div>
+        <div class="picker-coords" id="pickerCoords"></div>
+    </div>
+</div>
+
+<script src="CSInterface.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
