@@ -495,6 +495,10 @@ function _st_generateOverlayObjects(data, opts, polygonData) {
                     if (polyObj && polyObj.frames) {
                         var maskLayer = comp.layers.addShape();
                         maskLayer.name = "ST_Mask_" + objId;
+                        // Polygon vertices are in absolute comp-pixel coords,
+                        // so anchor the layer at [0,0] and position at [0,0]
+                        // to map shape space directly to comp space.
+                        maskLayer.transform.position.setValue([0, 0]);
 
                         var maskContents = maskLayer.property("ADBE Root Vectors Group");
                         var maskGrp = maskContents.addProperty("ADBE Vector Group");
@@ -560,6 +564,8 @@ function _st_generateOverlayObjects(data, opts, polygonData) {
 
                     var connLayer = comp.layers.addShape();
                     connLayer.name = "ST_Connect_" + idA + "_" + idB;
+                    // Line vertices use absolute comp-pixel coords
+                    connLayer.transform.position.setValue([0, 0]);
 
                     var connContents = connLayer.property("ADBE Root Vectors Group");
                     var connGrp = connContents.addProperty("ADBE Vector Group");
